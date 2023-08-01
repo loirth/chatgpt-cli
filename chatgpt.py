@@ -1,13 +1,12 @@
 #!/usr/bin/python3
 
 import os
-import logging
+import sys
+import time
 import signal
 import re
-import sys
 import sqlite3
-import time
-
+import logging
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,15 +21,14 @@ from openai.error import (
     APIConnectionError,
     InvalidRequestError,
     APIError,
-    RateLimitError
+    RateLimitError,
 )
 
-
+# Constants
 API_KEY = ""
 DEFAULT_ENGINE = "gpt-3.5-turbo"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
-
 
 @dataclass
 class ConfigGPT:
@@ -42,7 +40,7 @@ class ConfigGPT:
     chat_models: List[str] = field(default_factory=lambda: [
         "gpt-4",
         "gpt-4-0613",
-        "gpt-4-32k,",
+        "gpt-4-32k",
         "gpt-4-32k-0613",
         "gpt-3.5-turbo",
         "gpt-3.5-turbo-0613",
@@ -50,9 +48,8 @@ class ConfigGPT:
         "gpt-3.5-turbo-16k-0613",
     ])
 
-
 class ChatGPT:
-    """ChatGPT class for interacting with the OpenAI API."""
+    """ChatGpt class for interacting with the OpenAI API."""
     def __init__(self, config: ConfigGPT) -> None:
         self.config = config
         openai.api_key = self.config.api_key
@@ -74,21 +71,20 @@ class ChatGPT:
             return response.choices[0].text
 
     def create_message(
-        self, messages: Union[List, List[Dict]], content: str, role="user"
+        self, messages: Union[List, List[Dict]], content, author="user"
     ) -> str:
         """
-        Creates a message to send to the OpenAI API and handles possible errors.
+        Creates a message to send to the OpenAI API
+        and handles possible errors.
         """
         try:
-            if content.strip().lower() in (
-                ":q!", "exit", "q", "exit()", "quit"
-                ): sys.exit(0)
-            messages.append({"role": role, "content": content})
-
+            if content.strip().lower() in (":q!", "exit", "q", "exit()", "quit"):
+                sys.exit(0)
+            messages.append({"role": author, "content": content})
             return self.send_request(messages)
 
-        except APIError:
-            self.handle_error("[-] OpenAI API request exceeded rate limit.")
+        except APIError as error:
+            self.handle_error(error)
 
         except RateLimitError:
             self.handle_error("[-] This is caused by API outage. Please try again later")
@@ -101,7 +97,7 @@ class ChatGPT:
             )
 
         except APIConnectionError:
-            return self.handle_connection_error(messages, content, role)
+            return self.handle_connection_error(messages, content, author)
 
         except InvalidRequestError as error:
             self.handle_error(error)
@@ -109,18 +105,25 @@ class ChatGPT:
         except Exception as _exception:
             self.handle_error("[-] An unexpected error occurred.", _exception)
 
-    def handle_connection_error(self, messages: List[Dict], content, role):
-        """Handles connection errors when communicating with the OpenAI API."""
-        logger.error("[-] An internet connection error has occurred. Retrying...")
+    def handle_connection_error(
+            self, messages: List[Dict], content, author
+            ) -> List[Dict]:
+        """
+        Handles connection errors when communicating with the OpenAI API.
+        """
+        logger.error(
+            "[-] An internet connection error has occurred. Retrying..."
+            )
         time.sleep(3)
-        return self.create_message(messages, content, role)
+        return self.create_message(messages, content, author)
 
     @staticmethod
-    def handle_error(error_message, _exception: Exception = None):
+    def handle_error(error, _exception: Exception = None):
         """Handles various API-related errors and exceptions."""
-        logger.error(f"{error_message}\n{_exception}") if _exception else logger.error(f"{error_message}")
+        logger.error(
+            "{}\n{}".format(error, _exception) if _exception else error
+            )
         sys.exit(1)
-
 
 @dataclass
 class ConfigDB:
@@ -134,22 +137,23 @@ class ConfigDB:
         return datetime.utcfromtimestamp(
             timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
-
-class MessageDatabase(ChatGPT):
+class Database:
     """
     A class representing the message database for ChatGPT.
 
     This class provides methods for interacting with a SQLite database
     to store and retrieve chat messages.
     """
-    def __init__(self, config: ConfigDB):
-        self.config = config
-        self.path = self.config.path
-        self.name_database = config.name_db
+    def __init__(self, config_db: ConfigDB):
+        self.config_db = config_db
+        self.path = self.config_db.path
+        self.name_database = config_db.name_db
         self.path_database = os.path.join(self.path, self.name_database)
         self.create_database()
 
-    def execute_request(self, query: str, *, parameters: tuple = None, action: str = "operation") -> sqlite3.Cursor:
+    def execute_request(self, query: str, *, parameters: tuple = None,
+                        action: str = "operation"
+                        ) -> sqlite3.Cursor:
         """Executes a database query."""
         try:
             with sqlite3.connect(self.path_database) as connection:
@@ -201,7 +205,7 @@ class MessageDatabase(ChatGPT):
             message = {
                 "question": question,
                 "answer": answer.strip(),
-                "timestamp": self.config.readable_timestamp(timestamp),
+                "timestamp": self.config_db.readable_timestamp(timestamp),
             }
             history.append(message)
 
@@ -221,7 +225,7 @@ class MessageDatabase(ChatGPT):
             {
                 "question": question,
                 "answer": answer.strip(),
-                "timestamp": self.config.readable_timestamp(timestamp),
+                "timestamp": self.config_db.readable_timestamp(timestamp),
             }
         ]
 
@@ -235,32 +239,26 @@ class MessageDatabase(ChatGPT):
             self.handle_error("[-] There are no messages in the database yet.")
         logger.success("Last message deleted successfully.")
 
-    @staticmethod
-    def handle_error(error_message):
-        """Handles database-related errors."""
-        logger.error(f"{error_message}")
-        sys.exit(1)
+class CommandLineInterface(Database, ChatGPT):
+    def __init__(self, console: Console, cgpt_config: ConfigGPT, db_config: ConfigDB):
+        Database.__init__(self, config_db=db_config)
+        ChatGPT.__init__(self, config=cgpt_config)
 
-
-class CommandLineInterface:
-    def __init__(self, console: Console, gpt: ChatGPT, db: MessageDatabase):
         self.console = console
-        self.db = db
-        self.gpt = gpt
         self.markdown_pattern = re.compile(r'[\*_\[>\]#`]{1,3}')
 
     def send_message(self, arr_messages: List[Dict], message: str):
         """
         Generate an AI response for the given message and display it.
         """
-        answer = self.gpt.create_message(arr_messages, message)
+        answer = self.create_message(arr_messages, message)
         self.console.print("> Answer: ", style="bright_yellow bold")
         if self.has_markdown(answer):
             self.console.print(Markdown(answer), style="bold")
         else:
             self.animated_message(answer)
 
-        self.db.insert_message(message, answer)
+        self.insert_message(message, answer)
 
     def run(self, arr_messages: List[Dict]):
         """Handle user interactions with ChatGPT."""
@@ -272,10 +270,10 @@ class CommandLineInterface:
             return
 
         actions = {
-            "last_message": lambda: self.view_history(self.db.get_last_message()),
-            "clear_history": lambda: self.db.clear_message_history(),
-            "delete_last_message": lambda: self.db.delete_last_message(),
-            "view_history": lambda: self.view_history(self.db.get_message_history()),
+            "last_message": lambda: self.view_history(self.get_last_message()),
+            "clear_history": lambda: self.clear_message_history(),
+            "delete_last_message": lambda: self.delete_last_message(),
+            "view_history": lambda: self.view_history(self.get_message_history()),
         }
 
         for argument, value in arguments.__dict__.items():
@@ -302,6 +300,7 @@ class CommandLineInterface:
             question = message["question"]
             answer = message["answer"]
             self.console.print(f"> Question: \n{question}", style="bright_green bold")
+
             if self.has_markdown(answer):
                 self.console.print("> Answer: ", style="bold")
                 self.console.print(Markdown(answer), style="bold")
@@ -383,18 +382,15 @@ def main():
 
     console = Console()
 
-    config_db = ConfigDB()
-    config_gpt = ConfigGPT(
+    db_config = ConfigDB()
+    gpt_config = ConfigGPT(
         openai_api_key,
         DEFAULT_TEMPERATURE,
         DEFAULT_ENGINE,
         DEFAULT_MAX_TOKENS,
     )
 
-    chatgpt = ChatGPT(config_gpt)
-    database = MessageDatabase(config_db)
-
-    interface = CommandLineInterface(console, chatgpt, database)
+    interface = CommandLineInterface(console, gpt_config, db_config)
     interface.run(arr_messages)
 
 
