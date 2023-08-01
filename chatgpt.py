@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 
 import os
+import re
 import sys
 import time
 import signal
-import re
 import sqlite3
 import logging
+
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +31,7 @@ DEFAULT_ENGINE = "gpt-3.5-turbo"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
 
+
 @dataclass
 class ConfigGPT:
     """Configuration class for ChatGPT."""
@@ -47,6 +49,7 @@ class ConfigGPT:
         "gpt-3.5-turbo-16k",
         "gpt-3.5-turbo-16k-0613",
     ])
+
 
 class ChatGPT:
     """ChatGpt class for interacting with the OpenAI API."""
@@ -78,8 +81,9 @@ class ChatGPT:
         and handles possible errors.
         """
         try:
-            if content.strip().lower() in (":q!", "exit", "q", "exit()", "quit"):
-                sys.exit(0)
+            if content.strip().lower() in (
+                ":q!", "exit", "q", "exit()", "quit"
+                ): sys.exit(0)
             messages.append({"role": author, "content": content})
             return self.send_request(messages)
 
@@ -93,8 +97,7 @@ class ChatGPT:
             self.handle_error(
                 f"[-] Incorrect API key provided: {self.config.api_key}. "
                 "You can find your API key at "
-                "https://platform.openai.com/account/api-keys."
-            )
+                "https://platform.openai.com/account/api-keys.")
 
         except APIConnectionError:
             return self.handle_connection_error(messages, content, author)
@@ -107,14 +110,13 @@ class ChatGPT:
 
     def handle_connection_error(
             self, messages: List[Dict], content, author
-            ) -> List[Dict]:
+        ) -> List[Dict]:
         """
         Handles connection errors when communicating with the OpenAI API.
         """
         logger.error(
             "[-] An internet connection error has occurred. Retrying..."
-            )
-        time.sleep(3)
+            ); time.sleep(3)
         return self.create_message(messages, content, author)
 
     @staticmethod
@@ -122,8 +124,8 @@ class ChatGPT:
         """Handles various API-related errors and exceptions."""
         logger.error(
             "{}\n{}".format(error, _exception) if _exception else error
-            )
-        sys.exit(1)
+            ); sys.exit(1)
+
 
 @dataclass
 class ConfigDB:
@@ -136,6 +138,7 @@ class ConfigDB:
         """Converts a Unix timestamp to a human-readable date and time."""
         return datetime.utcfromtimestamp(
             timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
 
 class Database:
     """
@@ -152,8 +155,8 @@ class Database:
         self.create_database()
 
     def execute_request(self, query: str, *, parameters: tuple = None,
-                        action: str = "operation"
-                        ) -> sqlite3.Cursor:
+            action: str = "operation"
+        ) -> sqlite3.Cursor:
         """Executes a database query."""
         try:
             with sqlite3.connect(self.path_database) as connection:
@@ -221,15 +224,12 @@ class Database:
             self.handle_error("[-] There are no messages in the database yet.")
 
         question, answer, timestamp = row
-        return [
-            {
-                "question": question,
-                "answer": answer.strip(),
-                "timestamp": self.config_db.readable_timestamp(timestamp),
+        return {
+            "question": question, "answer": answer.strip(),
+            "timestamp": self.config_db.readable_timestamp(timestamp)
             }
-        ]
 
-    def delete_last_message(self):
+    def delete_last_message(self) -> None:
         """Deletes the last chat message from the database."""
         query = """DELETE FROM chat_messages WHERE id IN (
             SELECT id FROM chat_messages ORDER BY timestamp DESC LIMIT 1)"""
@@ -237,30 +237,36 @@ class Database:
 
         if not rows_affected:
             self.handle_error("[-] There are no messages in the database yet.")
+
         logger.success("Last message deleted successfully.")
 
+
 class CommandLineInterface(Database, ChatGPT):
-    def __init__(self, console: Console, cgpt_config: ConfigGPT, db_config: ConfigDB):
-        Database.__init__(self, config_db=db_config)
+    """A Command Line Interface for interacting with ChatGPT."""
+    def __init__(
+            self, rich_console, cgpt_config: ConfigGPT, config_db: ConfigDB
+            ) -> None:
+        Database.__init__(self, config_db=config_db)
         ChatGPT.__init__(self, config=cgpt_config)
 
-        self.console = console
+        self.console = rich_console
         self.markdown_pattern = re.compile(r'[\*_\[>\]#`]{1,3}')
 
-    def send_message(self, arr_messages: List[Dict], message: str):
+    def send_message(self, arr_messages: List[Dict], message: str) -> None:
         """
         Generate an AI response for the given message and display it.
         """
         answer = self.create_message(arr_messages, message)
         self.console.print("> Answer: ", style="bright_yellow bold")
-        if self.has_markdown(answer):
+
+        if self.contains_markdown(answer):
             self.console.print(Markdown(answer), style="bold")
         else:
             self.animated_message(answer)
 
         self.insert_message(message, answer)
 
-    def run(self, arr_messages: List[Dict]):
+    def run(self, arr_messages: List[Dict]) -> None:
         """Handle user interactions with ChatGPT."""
         message = ""
         arguments = self.parse_arguments()
@@ -270,10 +276,10 @@ class CommandLineInterface(Database, ChatGPT):
             return
 
         actions = {
-            "last_message": lambda: self.view_history(self.get_last_message()),
-            "clear_history": lambda: self.clear_message_history(),
-            "delete_last_message": lambda: self.delete_last_message(),
-            "view_history": lambda: self.view_history(self.get_message_history()),
+            "last_message": self.view_last_message,
+            "clear_history": self.clear_message_history,
+            "delete_last_message": self.delete_last_message,
+            "view_history": self.view_message_history,
         }
 
         for argument, value in arguments.__dict__.items():
@@ -286,29 +292,36 @@ class CommandLineInterface(Database, ChatGPT):
             message = str(self.console.input(ask_question))
             self.send_message(arr_messages, message)
 
-    def has_markdown(self, text: str) -> bool:
+    def contains_markdown(self, text: str) -> bool:
         """
         Use regular expression to check for markdown patterns,
         including code blocks.
         """
         return bool(self.markdown_pattern.search(text))
 
-    def view_history(self, history: List[Dict]):
+    def view_message_history(self) -> None:
         """Display the message history."""
-        for message in history:
-            self.console.print("-" * 19, style="bold")
-            question = message["question"]
-            answer = message["answer"]
-            self.console.print(f"> Question: \n{question}", style="bright_green bold")
+        for message in self.get_message_history():
+            self.show_message_info(message)
 
-            if self.has_markdown(answer):
-                self.console.print("> Answer: ", style="bold")
-                self.console.print(Markdown(answer), style="bold")
-            else:
-                self.console.print(f"> Answer: \n{answer}", style="bright_yellow bold")
+    def show_message_info(self, message: Dict[str, str]) -> None:
+        """Display the detailed information of a message."""
+        question = message["question"]
+        answer = message["answer"]
+        self.console.print(f"> Question: \n{question}", style="bright_green bold")
 
-            self.console.print(f"> Timestamp: \n{message['timestamp']}", style="bold")
+        if self.contains_markdown(answer):
+            self.console.print("> Answer: ", style="bold")
+            self.console.print(Markdown(answer), style="bold")
+        else:
+            self.console.print(f"> Answer: \n{answer}", style="bright_yellow bold")
+
+        self.console.print(f"> Timestamp: \n{message['timestamp']}", style="bold")
         self.console.print("-" * 19, style="bold")
+
+    def view_last_message(self) -> None:
+        """View the last message details"""
+        self.show_message_info(self.get_last_message())
 
     def parse_arguments(self) -> ArgumentParser:
         """
@@ -326,23 +339,31 @@ class CommandLineInterface(Database, ChatGPT):
             ),
         )
         parser.add_argument(
-            "-m",
-            "--message",
+            "-m", "--message",
             type=str,
             nargs="+",
-            help="Use to ask a question to ChatGPT. The program will terminate after one interaction.",
+            help="Use to ask a question to ChatGPT. "
+            "The program will terminate after one interaction.",
         )
         parser.add_argument(
-            "-lm", "--last-message", action="store_true", help="Get the last message from the message history."
+            "-lm", "--last-message",
+            action="store_true",
+            help="Get the last message from the message history."
         )
         parser.add_argument(
-            "-ch", "--clear-history", action="store_true", help="Clear the entire message history."
+            "-ch", "--clear-history",
+            action="store_true",
+            help="Clear the entire message history."
         )
         parser.add_argument(
-            "-dm", "--delete-last-message", action="store_true", help="Delete the last message from the message history."
+            "-dm", "--delete-last-message",
+            action="store_true",
+            help="Delete the last message from the message history."
         )
         parser.add_argument(
-            "-vh", "--view-history", action="store_true", help="View the entire message history."
+            "-vh", "--view-history",
+            action="store_true",
+            help="View the entire message history."
         )
 
         return parser.parse_args()
@@ -377,10 +398,10 @@ def main():
 
     configure_logging()
 
-    openai_api_key = os.getenv("API_KEY") or API_KEY
+    openai_api_key = os.getenv("API_KEY") or API_KEY or None
     arr_messages = []
 
-    console = Console()
+    rich_console = Console()
 
     db_config = ConfigDB()
     gpt_config = ConfigGPT(
@@ -390,7 +411,7 @@ def main():
         DEFAULT_MAX_TOKENS,
     )
 
-    interface = CommandLineInterface(console, gpt_config, db_config)
+    interface = CommandLineInterface(rich_console, gpt_config, db_config)
     interface.run(arr_messages)
 
 
