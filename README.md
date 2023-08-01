@@ -36,7 +36,7 @@ The ChatGPT CLI supports several command-line options that allow you to perform 
 1. **Asking a Single Question**: To ask a single question to ChatGPT, you can use the -m or --message option followed by your question. The CLI will display the AI-generated response and then terminate.
 
     ```bash
-    python3 chatgpt.py -m "What's the meaning of life?"
+    python3 chatgpt.py -m What is the meaning of life?
     ```
 
 2. **Viewing the Last Message**: To view the last message from the conversation history, use the -lm or --last-message option.
