@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 import os
 import re
 import sys
@@ -82,7 +80,7 @@ class ChatGPT:
         """
         try:
             if content.strip().lower() in (
-                ":q!", "exit", "q", "exit()", "quit"
+                ":q!", "q", "exit()",
                 ): sys.exit(0)
             messages.append({"role": author, "content": content})
             return self.send_request(messages)
