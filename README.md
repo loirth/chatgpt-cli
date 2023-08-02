@@ -8,6 +8,10 @@ To use the ChatGPT CLI, follow the steps below:
 
 1. **Clone the Repository:** Clone the repository containing the CLI code to your local machine.
 
+    ```bash
+    git clone git@github.com:g3dox/chatgpt-cli.git
+    ```
+
 2. **Install Required Packages:** Ensure that you have Python 3 and pip installed on your system. Use pip to install the required packages from the "requirements.txt" file:
 
     ```bash
@@ -28,6 +32,16 @@ Once you have installed the CLI and set up your OpenAI API key, you can start in
 ### Basic Usage
 
 1. **Asking a Question**: You can interact with ChatGPT by simply typing your question or message and pressing Enter. The CLI will then display the AI-generated response.
+
+### Commands
+
+1. **Exiting the program**: To exit the program, you can use the ":q!", "q" or "exit()".
+
+    ```python
+    Ask a question: :q!
+    Ask a question: q
+    Ask a question: exit()
+    ```
 
 ### Command-Line Options
 
